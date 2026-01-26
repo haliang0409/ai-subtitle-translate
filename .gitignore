@@ -44,9 +44,13 @@ wheels/
 .DS_Store
 Thumbs.db
 
-# Project specific
+# Project specific - test files
 *.srt_translated
 sample.srt
 test_api.py
 MIDA-288-ja.srt
 MIDA-288-ja_translated.srt
+*_translated.srt
+*_translated.ass
+*_translated.vtt
+*_translated.lrc

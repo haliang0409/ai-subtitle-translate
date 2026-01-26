@@ -1,4 +1,6 @@
 openai
 pysrt
+pysubs2
 python-dotenv
 tqdm
+requests

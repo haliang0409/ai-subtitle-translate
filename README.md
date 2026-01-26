@@ -1,11 +1,13 @@
 # SRT Translator
 
-使用 OpenAI 兼容 API 翻译 `.srt` 字幕文件的 Python 工具。
+使用 OpenAI 兼容 API 翻译字幕文件的 Python 工具。
 
 ## 功能特性
 
+- ✅ 支持多种字幕格式：**SRT、ASS、SSA、VTT、SUB、LRC**
 - ✅ 支持任何 OpenAI 兼容的 API（OpenAI、DeepSeek、本地 LLM 等）
 - ✅ 批量翻译，减少 API 调用次数
+- ✅ **增强上下文模式**：滑动窗口技术，保持翻译连贯性
 - ✅ 自动重试机制（失败后等待 3 秒重试，最多 3 次）
 - ✅ 断点续传（中断后可继续翻译）
 - ✅ 请求间隔控制，避免触发限流
@@ -40,6 +42,7 @@ cp .env.example .env
 | `TARGET_LANGUAGE` | ❌ | `Chinese` | 目标翻译语言 |
 | `BATCH_SIZE` | ❌ | `30` | 每次 API 调用翻译的字幕条数 |
 | `REQUEST_INTERVAL` | ❌ | `1.0` | API 请求间隔（秒），防止限流 |
+| `CONTEXT_WINDOW` | ❌ | `5` | 增强上下文模式的窗口大小 |
 | `DISABLE_PROXY` | ❌ | `true` | 是否禁用代理（本地 API 建议 `true`） |
 
 ### 配置示例
@@ -91,6 +94,11 @@ python main.py --test
 # 基本用法（输出到 input_translated.srt）
 python main.py your_subtitle.srt
 
+# 翻译其他格式
+python main.py video.ass
+python main.py lyrics.lrc
+python main.py subtitles.vtt
+
 # 指定输出文件
 python main.py your_subtitle.srt -o output.srt
 
@@ -100,9 +108,23 @@ python main.py your_subtitle.srt -l Japanese
 # 指定批次大小（覆盖 .env 配置）
 python main.py your_subtitle.srt -b 50
 
+# 启用增强上下文模式（更好的翻译连贯性）
+python main.py your_subtitle.srt --context
+
 # 忽略之前的进度，从头开始
 python main.py your_subtitle.srt --no-resume
 ```
+
+### 支持的字幕格式
+
+| 格式 | 扩展名 | 说明 |
+|------|--------|------|
+| SubRip | `.srt` | 最常见的字幕格式 |
+| Advanced SSA | `.ass` | 支持样式和特效的字幕格式 |
+| SubStation Alpha | `.ssa` | ASS 的前身 |
+| WebVTT | `.vtt` | Web 视频字幕格式 |
+| MicroDVD | `.sub` | 基于帧的字幕格式 |
+| LRC | `.lrc` | 歌词文件格式 |
 
 ### 命令行参数
 
@@ -113,7 +135,36 @@ python main.py your_subtitle.srt --no-resume
 | `--lang` | `-l` | 目标语言（覆盖 .env 配置）|
 | `--batch` | `-b` | 批次大小（覆盖 .env 配置）|
 | `--test` | - | 测试 API 连接 |
+| `--context` | - | 启用增强上下文模式 |
 | `--no-resume` | - | 忽略之前的进度，从头开始翻译 |
+
+## 翻译模式
+
+### 标准模式（默认）
+
+每次翻译一个批次的字幕，适合大多数场景。
+
+```bash
+python main.py your_subtitle.srt
+```
+
+### 增强上下文模式
+
+使用滑动窗口技术，在翻译当前批次时提供前后文上下文，显著提升翻译连贯性。适合：
+- 对话密集的影视字幕
+- 需要保持角色语气一致的场景
+- 有大量代词指代的内容
+
+```bash
+python main.py your_subtitle.srt --context
+```
+
+**工作原理：**
+- 翻译当前批次时，会将前 N 条已翻译的字幕（原文+译文）作为上下文
+- 同时提供后 N 条未翻译的原文作为预览
+- 模型可以根据上下文做出更准确的翻译决策
+
+可通过 `CONTEXT_WINDOW` 环境变量调整窗口大小（默认 5）。
 
 ## 断点续传
 
