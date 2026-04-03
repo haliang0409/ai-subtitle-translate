@@ -4,3 +4,4 @@ pysubs2
 python-dotenv
 tqdm
 requests
+customtkinter

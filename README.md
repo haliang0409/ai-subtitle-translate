@@ -1,24 +1,28 @@
-# SRT Translator
+# AI 字幕翻译工具
 
-使用 OpenAI 兼容 API 翻译字幕文件的 Python 工具。
+使用 OpenAI 兼容 API 翻译字幕文件的 Python 工具，提供**命令行**和**图形界面**两种使用方式。
 
 ## 功能特性
 
 - ✅ 支持多种字幕格式：**SRT、ASS、SSA、VTT、SUB、LRC**
 - ✅ 支持任何 OpenAI 兼容的 API（OpenAI、DeepSeek、本地 LLM 等）
+- ✅ **多 API 轮询**：配置多组 API，自动轮流使用，单组失败自动切换
+- ✅ **图形界面 (GUI)**：基于 customtkinter，支持深色/浅色/跟随系统主题
 - ✅ 批量翻译，减少 API 调用次数
 - ✅ **增强上下文模式**：滑动窗口技术，保持翻译连贯性
-- ✅ 自动重试机制（失败后等待 3 秒重试，最多 3 次）
+- ✅ 自动重试机制（失败后等待重试，最多 N 次）
 - ✅ 断点续传（中断后可继续翻译）
 - ✅ 请求间隔控制，避免触发限流
-- ✅ 进度条显示
+- ✅ **格式转换**：输入 SRT，输出 ASS 等（GUI 支持）
+- ✅ **批量队列**：GUI 支持多文件依次翻译
+- ✅ 最近文件历史（GUI 快速重载）
 
 ## 安装
 
 ```bash
 # 创建虚拟环境（推荐）
 python3 -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 安装依赖
 pip install -r requirements.txt
@@ -26,205 +30,212 @@ pip install -r requirements.txt
 
 ## 配置
 
-复制 `.env.example` 为 `.env` 并填写配置：
+### 方式一：图形界面配置（推荐）
+
+启动 GUI 后，在「API 设置」标签页填写 API 信息，点击「保存设置」即可。配置保存在同目录的 `config.json`，无需手动编辑文件。
+
+### 方式二：环境变量配置（命令行）
+
+复制 `.env.example` 为 `.env` 并填写：
 
 ```bash
 cp .env.example .env
 ```
 
-### 环境变量说明
+#### 多 API 配置（推荐）
 
-| 变量名 | 必填 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `OPENAI_API_KEY` | ✅ | - | API 密钥 |
-| `OPENAI_BASE_URL` | ✅ | `https://api.openai.com/v1` | API 端点地址 |
-| `MODEL_NAME` | ❌ | `gpt-4o-mini` | 使用的模型名称 |
-| `TARGET_LANGUAGE` | ❌ | `Chinese` | 目标翻译语言 |
-| `BATCH_SIZE` | ❌ | `30` | 每次 API 调用翻译的字幕条数 |
-| `REQUEST_INTERVAL` | ❌ | `1.0` | API 请求间隔（秒），防止限流 |
-| `CONTEXT_WINDOW` | ❌ | `5` | 增强上下文模式的窗口大小 |
-| `DISABLE_PROXY` | ❌ | `true` | 是否禁用代理（本地 API 建议 `true`） |
-
-### 配置示例
-
-**使用本地 API（如 LM Studio、Ollama）：**
 ```dotenv
-OPENAI_API_KEY=sk-your-key
-OPENAI_BASE_URL=http://127.0.0.1:8045/v1
-MODEL_NAME=claude-sonnet-4-5-thinking
-TARGET_LANGUAGE=Chinese
-BATCH_SIZE=50
-REQUEST_INTERVAL=1.0
-DISABLE_PROXY=true
+API_1_KEY=sk-your-first-key
+API_1_BASE_URL=https://api.openai.com/v1
+API_1_MODEL=gpt-4o-mini
+
+API_2_KEY=sk-your-second-key
+API_2_BASE_URL=https://api.deepseek.com
+API_2_MODEL=deepseek-chat
 ```
 
-**使用 OpenAI 官方 API：**
+#### 单 API 配置（兼容旧版）
+
 ```dotenv
-OPENAI_API_KEY=sk-your-openai-key
+OPENAI_API_KEY=sk-your-key
 OPENAI_BASE_URL=https://api.openai.com/v1
 MODEL_NAME=gpt-4o-mini
 TARGET_LANGUAGE=Chinese
-BATCH_SIZE=30
-REQUEST_INTERVAL=1.0
-DISABLE_PROXY=false
 ```
 
-**使用 DeepSeek：**
-```dotenv
-OPENAI_API_KEY=sk-your-deepseek-key
-OPENAI_BASE_URL=https://api.deepseek.com
-MODEL_NAME=deepseek-chat
-TARGET_LANGUAGE=Chinese
-BATCH_SIZE=30
-REQUEST_INTERVAL=1.0
-DISABLE_PROXY=false
-```
+#### 环境变量说明
+
+| 变量名 | 默认值 | 说明 |
+|--------|--------|------|
+| `API_N_KEY` | — | 第 N 组 API 密钥 |
+| `API_N_BASE_URL` | `https://api.openai.com/v1` | 第 N 组 API 端点 |
+| `API_N_MODEL` | 同 `MODEL_NAME` | 第 N 组使用的模型 |
+| `API_N_DISABLE_PROXY` | 同 `DISABLE_PROXY` | 第 N 组代理设置 |
+| `TARGET_LANGUAGE` | `Chinese` | 翻译目标语言 |
+| `MODEL_NAME` | `gpt-4o-mini` | 默认模型（备用） |
+| `BATCH_SIZE` | `30` | 每批翻译的字幕条数 |
+| `REQUEST_INTERVAL` | `1.0` | 请求间隔（秒） |
+| `CONTEXT_WINDOW` | `5` | 增强上下文窗口大小 |
+| `DISABLE_PROXY` | `true` | 是否禁用代理 |
 
 ## 使用方法
 
-### 测试 API 连接
+### 图形界面（GUI）
+
+```bash
+python gui.py
+```
+
+#### 翻译 Tab
+1. 点击「浏览」选择输入字幕文件（显示格式和条数）
+2. 输出路径自动生成，也可手动指定
+3. 设置目标语言（可覆盖保存的设置）
+4. 勾选所需选项：断点续传、增强上下文
+5. 通过「批量队列」添加多个文件，依次翻译
+6. 点击「▶ 开始翻译」；翻译中可点「⏹ 停止翻译」随时中断
+
+#### API 设置 Tab
+- 动态添加/删除/排序多组 API 配置
+- 每条可单独「测试」连接；「测试全部」批量验证
+
+#### 高级设置 Tab
+- 调整批次大小、请求间隔、上下文窗口等参数（滑块联动）
+- 设置输出格式转换（如 SRT → ASS）
+- 管理最近文件历史
+- 切换界面主题（跟随系统 / 浅色 / 深色）
+- 点击「💾 保存设置」持久化到 `config.json`
+
+---
+
+### 命令行（CLI）
+
+#### 测试 API 连接
 
 ```bash
 python main.py --test
 ```
 
-### 翻译字幕文件
+#### 翻译字幕文件
 
 ```bash
 # 基本用法（输出到 input_translated.srt）
 python main.py your_subtitle.srt
 
-# 翻译其他格式
-python main.py video.ass
-python main.py lyrics.lrc
-python main.py subtitles.vtt
-
-# 指定输出文件
+# 指定输出路径
 python main.py your_subtitle.srt -o output.srt
 
-# 指定目标语言（覆盖 .env 配置）
+# 指定目标语言
 python main.py your_subtitle.srt -l Japanese
 
-# 指定批次大小（覆盖 .env 配置）
+# 指定批次大小
 python main.py your_subtitle.srt -b 50
 
-# 启用增强上下文模式（更好的翻译连贯性）
+# 启用增强上下文模式
 python main.py your_subtitle.srt --context
 
-# 忽略之前的进度，从头开始
+# 忽略进度，从头翻译
 python main.py your_subtitle.srt --no-resume
 ```
 
-### 支持的字幕格式
+#### 命令行参数
+
+| 参数 | 简写 | 说明 |
+|------|------|------|
+| `input` | — | 输入文件路径 |
+| `--output` | `-o` | 输出文件路径（默认：`input_translated.srt`）|
+| `--lang` | `-l` | 目标语言（覆盖 .env 配置）|
+| `--batch` | `-b` | 批次大小（覆盖 .env 配置）|
+| `--test` | — | 测试所有 API 连接 |
+| `--context` | — | 启用增强上下文模式 |
+| `--no-resume` | — | 忽略之前进度，从头翻译 |
+
+## 支持的字幕格式
 
 | 格式 | 扩展名 | 说明 |
 |------|--------|------|
 | SubRip | `.srt` | 最常见的字幕格式 |
-| Advanced SSA | `.ass` | 支持样式和特效的字幕格式 |
+| Advanced SSA | `.ass` | 支持样式和特效 |
 | SubStation Alpha | `.ssa` | ASS 的前身 |
-| WebVTT | `.vtt` | Web 视频字幕格式 |
-| MicroDVD | `.sub` | 基于帧的字幕格式 |
-| LRC | `.lrc` | 歌词文件格式 |
-
-### 命令行参数
-
-| 参数 | 简写 | 说明 |
-|------|------|------|
-| `input` | - | 输入的 .srt 文件路径 |
-| `--output` | `-o` | 输出文件路径（默认：`input_translated.srt`）|
-| `--lang` | `-l` | 目标语言（覆盖 .env 配置）|
-| `--batch` | `-b` | 批次大小（覆盖 .env 配置）|
-| `--test` | - | 测试 API 连接 |
-| `--context` | - | 启用增强上下文模式 |
-| `--no-resume` | - | 忽略之前的进度，从头开始翻译 |
+| WebVTT | `.vtt` | Web 视频字幕 |
+| MicroDVD | `.sub` | 基于帧的字幕 |
+| LRC | `.lrc` | 歌词文件 |
 
 ## 翻译模式
 
 ### 标准模式（默认）
 
-每次翻译一个批次的字幕，适合大多数场景。
+每批独立翻译，速度快，适合大多数场景。
 
-```bash
-python main.py your_subtitle.srt
-```
+### 增强上下文模式（`--context` / GUI 勾选）
 
-### 增强上下文模式
-
-使用滑动窗口技术，在翻译当前批次时提供前后文上下文，显著提升翻译连贯性。适合：
+使用滑动窗口，翻译时提供前后文，显著提升连贯性。适合：
 - 对话密集的影视字幕
 - 需要保持角色语气一致的场景
 - 有大量代词指代的内容
 
-```bash
-python main.py your_subtitle.srt --context
-```
-
-**工作原理：**
-- 翻译当前批次时，会将前 N 条已翻译的字幕（原文+译文）作为上下文
-- 同时提供后 N 条未翻译的原文作为预览
-- 模型可以根据上下文做出更准确的翻译决策
-
-可通过 `CONTEXT_WINDOW` 环境变量调整窗口大小（默认 5）。
+可通过 `CONTEXT_WINDOW` 或 GUI 高级设置调整窗口大小（默认 5）。
 
 ## 断点续传
 
-程序会自动保存翻译进度：
+程序每翻译完一批自动保存进度（`.progress` 文件）：
 
-1. **自动保存**：每翻译完一个批次，自动保存进度到 `.progress` 文件
-2. **中断恢复**：
-   - API 错误重试 3 次失败后，自动保存进度并退出
-   - 按 `Ctrl+C` 手动中断时，自动保存进度
-3. **继续翻译**：再次运行相同命令，程序会询问是否继续
+- **CLI**：重新运行相同命令，程序询问是否继续
+- **GUI**：勾选「断点续传」后，自动从上次中断位置继续
+- 翻译完成后 `.progress` 文件自动清除
 
-```
-📂 Found previous progress: 50/200 subtitles translated.
-   Continue from where you left off? [Y/n]: 
-```
+## 多 API 轮询
 
-## 翻译 Prompt 设计
+配置多组 API 后：
 
-程序使用专门针对字幕翻译优化的 Prompt：
-
-- **批量处理**：将多条字幕编号后一起发送，保持上下文连贯
-- **换行保持**：使用 `[BR]` 占位符处理字幕内换行
-- **角色设定**：设定为专业影视翻译专家
-- **格式约束**：要求返回相同数量的编号行，确保一一对应
+1. 每次 API 请求自动轮流使用各组 API
+2. 某组连续失败（达到最大重试次数）后自动切换到下一组
+3. 所有 API 均失败时才中止翻译
+4. GUI 支持可视化管理：增删排序，单独测试连接状态
 
 ## 项目结构
 
 ```
-subtitle/
+ai-subtitle-translate/
+├── gui.py            # 图形界面入口
 ├── main.py           # 命令行入口
 ├── translator.py     # 核心翻译逻辑
+├── config.py         # GUI 配置管理
+├── config.json       # GUI 配置文件（自动生成）
 ├── requirements.txt  # Python 依赖
-├── .env             # 环境配置（需自行创建）
-├── .env.example     # 配置模板
-└── README.md        # 本文档
+├── .env              # 命令行环境配置（需自行创建）
+├── .env.example      # 配置模板
+└── README.md         # 本文档
 ```
 
 ## 故障排除
 
-### Connection error
+### Connection error / 无法连接
 
-如果遇到 `Connection error`，可能是因为：
+1. **代理问题**：本地 API 建议勾选「禁用代理」或设置 `DISABLE_PROXY=true`
+2. **地址错误**：检查 Base URL 是否正确（注意 `/v1` 后缀）
+3. **服务未启动**：确认本地 API 服务已运行
 
-1. **代理问题**：本地 API 不需要代理，确保 `.env` 中设置 `DISABLE_PROXY=true`
-2. **API 地址错误**：检查 `OPENAI_BASE_URL` 是否正确（注意是否需要 `/v1` 后缀）
-3. **服务未启动**：确保本地 API 服务已启动
-
-使用 curl 测试 API：
 ```bash
-curl http://127.0.0.1:8045/v1/chat/completions \
+# 用 curl 手动测试 API
+curl https://api.openai.com/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_API_KEY" \
-  -d '{"model": "your-model", "messages": [{"role": "user", "content": "Hello"}]}'
+  -H "Authorization: Bearer YOUR_KEY" \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"Hi"}]}'
 ```
 
 ### 429 Too Many Requests（限流）
 
-1. 增加 `REQUEST_INTERVAL`（如设为 `2.0`）
-2. 减少 `BATCH_SIZE`（如设为 `20`）
-3. 程序会自动重试 3 次，每次等待 3 秒
+1. 增大「请求间隔」（建议 2.0 秒以上）
+2. 减小「批次大小」（如 15~20）
+3. 程序会自动按设置的次数重试
+
+### GUI 无法启动
+
+确认已安装 customtkinter：
+
+```bash
+pip install customtkinter
+```
 
 ## License
 
