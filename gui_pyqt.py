@@ -209,7 +209,7 @@ class SubtitleTranslatorApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("AI 字幕翻译工具")
+        self.setWindowTitle("AI Subtitle Translator By:haliang0409")
         self.setGeometry(100, 100, 900, 750)
 
         self._cfg = config.load()

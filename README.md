@@ -20,7 +20,7 @@
 
 ```bash
 # 1. 下载代码并进入目录
-git clone https://github.com/your-repo/ai-subtitle-translate.git
+git clone https://github.com/haliang0409/ai-subtitle-translate.git
 cd ai-subtitle-translate
 
 # 2. 创建并激活虚拟环境（推荐）
@@ -85,12 +85,6 @@ python main.py your_subtitle.srt --context
 python main.py your_subtitle.srt --no-resume
 ```
 
-## 进阶特性的工作原理
-
-1. **单条失败兜底**：`SubtitleTranslator` 类在尝试一次性提交 30 条字幕给 LLM 翻译时，若 LLM 返回的行数对不上、序号紊乱，系统会捕获这一错误，将这 30 句话拆开，**逐一并独立**发送给 LLM 取回单句翻译（结合缓存机制，已翻译正确的不再计费），避免重试造成的资源浪费死循环。
-2. **多 API Fallback 轮询**：当你配置了 OpenAI 和 DeepSeek 之后，若 OpenAI 报错，系统在一定重试次数后会立刻降级走 DeepSeek 的 API，增强了高可用性。
-3. **Token 与成本追踪**：如果环境库中存在 `tiktoken`，系统计算 Prompt 和 Completion 的精准消耗，按 $0.15 / 1M in 与 $0.60 / 1M out 的默认标准系数展示使用成本。并在 `gui_pyqt.py` 面板进行结算展示。
-
 ## 支持的字幕格式
 
 | 格式 | 扩展名 | 说明 |
@@ -105,8 +99,6 @@ python main.py your_subtitle.srt --no-resume
 ## 开源协议
 
 MIT License. Feel free to use and modify.
-3. 所有 API 均失败时才中止翻译
-4. GUI 支持可视化管理：增删排序，单独测试连接状态
 
 ## 项目结构
 
