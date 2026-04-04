@@ -26,6 +26,11 @@ DEFAULT_CONFIG: dict = {
     "disable_proxy": True,
     "theme": "system",
     "recent_files": [],
+    "refine_pass": False,
+    "max_length": 40,
+    "smart_break": True,
+    "punct_localize": True,
+    "enable_cache": True,
 }
 
 

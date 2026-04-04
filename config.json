@@ -1,0 +1,25 @@
+{
+  "apis": [
+    {
+      "key": "",
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4o-mini",
+      "disable_proxy": true
+    }
+  ],
+  "target_language": "Chinese",
+  "model_name": "gpt-4o-mini",
+  "batch_size": 30,
+  "request_interval": 1.0,
+  "context_window": 5,
+  "max_retries": 3,
+  "retry_delay": 3,
+  "disable_proxy": true,
+  "theme": "system",
+  "recent_files": [],
+  "refine_pass": false,
+  "max_length": 40,
+  "smart_break": true,
+  "punct_localize": true,
+  "enable_cache": true
+}
