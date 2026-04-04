@@ -98,7 +98,7 @@ python main.py your_subtitle.srt --no-resume
 
 ## 开源协议
 
-MIT License. Feel free to use and modify.
+MIT License
 
 ## 项目结构
 
@@ -139,12 +139,4 @@ curl https://api.openai.com/v1/chat/completions \
 
 ### GUI 无法启动
 
-确认已安装 customtkinter：
-
-```bash
-pip install customtkinter
-```
-
-## License
-
-MIT
+确认已在虚拟环境内安装 PyQt。
