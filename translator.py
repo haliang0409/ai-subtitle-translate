@@ -69,11 +69,11 @@ class SubtitleTranslator:
         # New features
         import config
         cfg = config.load()
-        self.refine_pass = cfg.get("refine_pass", False)
-        self.max_length = int(cfg.get("max_length", 40))
-        self.smart_break = cfg.get("smart_break", True)
-        self.punct_localize = cfg.get("punct_localize", True)
-        self.enable_cache = cfg.get("enable_cache", True)
+        self.refine_pass = str(os.getenv("REFINE_PASS", cfg.get("refine_pass", False))).lower() == "true"
+        self.max_length = int(os.getenv("MAX_LENGTH", cfg.get("max_length", 40)))
+        self.smart_break = str(os.getenv("SMART_BREAK", cfg.get("smart_break", True))).lower() == "true"
+        self.punct_localize = str(os.getenv("PUNCT_LOCALIZE", cfg.get("punct_localize", True))).lower() == "true"
+        self.enable_cache = str(os.getenv("ENABLE_CACHE", cfg.get("enable_cache", True))).lower() == "true"
         self.cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".translation_cache.json")
         self.cache = self._load_cache()
         self.total_tokens = 0
