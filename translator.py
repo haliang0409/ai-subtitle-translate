@@ -5,14 +5,10 @@ import requests
 import time
 import pysubs2
 import hashlib
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from tqdm import tqdm
-try:
-    import tiktoken
-    HAS_TIKTOKEN = True
-except ImportError:
-    HAS_TIKTOKEN = False
-
 try:
     import tiktoken
     HAS_TIKTOKEN = True
@@ -62,6 +58,10 @@ class SubtitleTranslator:
 
         # Round-robin index — tracks which API to use next
         self._current_api_index = 0
+        self._api_index_lock = threading.Lock()
+
+        # Thread-safe counters
+        self._cost_lock = threading.Lock()
 
         if len(self.api_configs) > 1:
             print(f"🔄 Loaded {len(self.api_configs)} API configurations")
@@ -107,9 +107,10 @@ class SubtitleTranslator:
         return len(text) // 2
 
     def _update_cost(self, prompt_tokens, completion_tokens):
-        self.total_tokens += prompt_tokens + completion_tokens
-        # Simple estimation: $0.15 per 1M input, $0.60 per 1M output (gpt-4o-mini limits)
-        self.total_cost += (prompt_tokens / 1000000.0) * 0.15 + (completion_tokens / 1000000.0) * 0.60
+        with self._cost_lock:
+            self.total_tokens += prompt_tokens + completion_tokens
+            # Simple estimation: $0.15 per 1M input, $0.60 per 1M output (gpt-4o-mini limits)
+            self.total_cost += (prompt_tokens / 1000000.0) * 0.15 + (completion_tokens / 1000000.0) * 0.60
 
 
     def _load_api_configs(self):
@@ -180,8 +181,11 @@ class SubtitleTranslator:
         n = len(self.api_configs)
         last_error = None
 
+        with self._api_index_lock:
+            start_index = self._current_api_index
+
         for api_attempt in range(n):
-            api_index = (self._current_api_index + api_attempt) % n
+            api_index = (start_index + api_attempt) % n
             config = self.api_configs[api_index]
 
             headers = {
@@ -204,7 +208,8 @@ class SubtitleTranslator:
                     )
                     response.raise_for_status()
                     # Success — advance round-robin index for next call
-                    self._current_api_index = (api_index + 1) % n
+                    with self._api_index_lock:
+                        self._current_api_index = (api_index + 1) % n
                     result = response.json()
                     usage = result.get("usage", {})
                     if usage:
@@ -465,7 +470,59 @@ class SubtitleTranslator:
         if os.path.exists(progress_file):
             os.remove(progress_file)
 
-    def translate(self, input_file, output_file, batch_size=None, resume=True, enhanced_context=False):
+    def _translate_chunk(self, chunk_indices, all_originals, all_translations,
+                         batch_size, enhanced_context, total, pbar, pbar_lock,
+                         stop_event=None):
+        """
+        Translate a chunk of subtitles (used by each thread).
+
+        Args:
+            chunk_indices: (start, end) index range for this chunk
+            all_originals: Full list of original texts
+            all_translations: Shared list for storing translations (thread writes to its own range)
+            batch_size: Number of lines per API call
+            enhanced_context: Whether to use context mode
+            total: Total subtitle count
+            pbar: tqdm progress bar (shared)
+            pbar_lock: Lock for progress bar updates
+            stop_event: Optional threading.Event to signal early stop
+        """
+        chunk_start, chunk_end = chunk_indices
+
+        for i in range(chunk_start, chunk_end, batch_size):
+            if stop_event and stop_event.is_set():
+                return
+
+            batch_end = min(i + batch_size, chunk_end)
+            batch_texts = all_originals[i:batch_end]
+
+            if enhanced_context:
+                context_start = max(0, i - self.context_window)
+                context_before = []
+                for j in range(context_start, i):
+                    if all_translations[j]:
+                        context_before.append((all_originals[j], all_translations[j]))
+                context_end = min(total, batch_end + self.context_window)
+                context_after = all_originals[batch_end:context_end]
+                translated_texts = self.translate_batch_with_context(
+                    batch_texts, context_before, context_after
+                )
+            else:
+                translated_texts = self.translate_batch(batch_texts)
+
+            for j, translated_text in enumerate(translated_texts):
+                idx = i + j
+                if idx < total:
+                    all_translations[idx] = translated_text
+
+            with pbar_lock:
+                pbar.update(len(batch_texts))
+
+            if batch_end < chunk_end and self.request_interval > 0:
+                time.sleep(self.request_interval)
+
+    def translate(self, input_file, output_file, batch_size=None, resume=True,
+                  enhanced_context=False, num_threads=1):
         """
         Translate a subtitle file.
 
@@ -475,6 +532,7 @@ class SubtitleTranslator:
             batch_size: Number of subtitles to translate in one API call
             resume: If True, resume from previous progress if available
             enhanced_context: If True, use sliding window context for better coherence
+            num_threads: Number of concurrent translation threads
         """
         if batch_size is None:
             batch_size = self.default_batch_size
@@ -517,50 +575,53 @@ class SubtitleTranslator:
                     start_index = 0
 
         mode_str = "enhanced context" if enhanced_context else "standard"
-        print(f"📝 Translation mode: {mode_str}")
+        remaining = total - start_index
+        num_threads = max(1, min(num_threads, remaining))
+        thread_str = f", {num_threads} thread(s)" if num_threads > 1 else ""
+        print(f"📝 Translation mode: {mode_str}{thread_str}")
 
         try:
+            pbar_lock = threading.Lock()
             with tqdm(total=total, initial=start_index, desc="Translating") as pbar:
-                for i in range(start_index, total, batch_size):
-                    batch_end = min(i + batch_size, total)
-                    batch_texts = all_originals[i:batch_end]
+                if num_threads <= 1:
+                    # Single-threaded: original sequential logic
+                    self._translate_chunk(
+                        (start_index, total), all_originals, all_translations,
+                        batch_size, enhanced_context, total, pbar, pbar_lock,
+                    )
+                else:
+                    # Multi-threaded: split remaining range into chunks
+                    chunk_size = remaining // num_threads
+                    chunks = []
+                    for t in range(num_threads):
+                        c_start = start_index + t * chunk_size
+                        c_end = start_index + (t + 1) * chunk_size if t < num_threads - 1 else total
+                        if c_start < c_end:
+                            chunks.append((c_start, c_end))
 
-                    if enhanced_context:
-                        # Get context before (already translated)
-                        context_start = max(0, i - self.context_window)
-                        context_before = []
-                        for j in range(context_start, i):
-                            if all_translations[j]:
-                                context_before.append((all_originals[j], all_translations[j]))
+                    errors = []
+                    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                        futures = {
+                            executor.submit(
+                                self._translate_chunk,
+                                chunk, all_originals, all_translations,
+                                batch_size, enhanced_context, total, pbar, pbar_lock,
+                            ): chunk
+                            for chunk in chunks
+                        }
+                        for future in as_completed(futures):
+                            exc = future.exception()
+                            if exc:
+                                errors.append(exc)
 
-                        # Get context after (not yet translated)
-                        context_end = min(total, batch_end + self.context_window)
-                        context_after = all_originals[batch_end:context_end]
+                    if errors:
+                        raise TranslationError(f"Translation failed: {errors[0]}")
 
-                        translated_texts = self.translate_batch_with_context(
-                            batch_texts, context_before, context_after
-                        )
-                    else:
-                        translated_texts = self.translate_batch(batch_texts)
-
-                    # Update subtitles and translation cache
-                    for j, translated_text in enumerate(translated_texts):
-                        idx = i + j
-                        if idx < total:
-                            # Restore newlines
-                            final_text = translated_text.replace(' [BR] ', '\n').replace('[BR]', '\n')
-                            subs[idx].text = final_text
-                            all_translations[idx] = translated_text
-
-                    # Save progress
-                    current_index = batch_end
-                    self._save_progress(output_file, current_index, subs)
-
-                    pbar.update(len(batch_texts))
-
-                    # Add delay between requests
-                    if current_index < total and self.request_interval > 0:
-                        time.sleep(self.request_interval)
+            # Apply translations to subs
+            for idx in range(start_index, total):
+                if all_translations[idx] is not None:
+                    final_text = all_translations[idx].replace(' [BR] ', '\n').replace('[BR]', '\n')
+                    subs[idx].text = final_text
 
             # Clear progress file on successful completion
             self._clear_progress(output_file)
@@ -569,14 +630,22 @@ class SubtitleTranslator:
             return True
 
         except TranslationError as e:
+            # Save whatever we have
+            for idx in range(total):
+                if all_translations[idx] is not None:
+                    subs[idx].text = all_translations[idx].replace(' [BR] ', '\n').replace('[BR]', '\n')
+            self._save_progress(output_file, sum(1 for t in all_translations if t is not None), subs)
             print(f"\n🛑 Translation aborted: {e}")
-            print(f"   Progress saved: {i}/{total} subtitles translated.")
             print(f"   Run the same command again to resume.")
             return False
         except KeyboardInterrupt:
-            self._save_progress(output_file, i, subs)
+            for idx in range(total):
+                if all_translations[idx] is not None:
+                    subs[idx].text = all_translations[idx].replace(' [BR] ', '\n').replace('[BR]', '\n')
+            translated_count = sum(1 for t in all_translations if t is not None)
+            self._save_progress(output_file, translated_count, subs)
             print(f"\n\n⏸️  Translation interrupted by user.")
-            print(f"   Progress saved: {i}/{total} subtitles translated.")
+            print(f"   Progress saved: {translated_count}/{total} subtitles translated.")
             print(f"   Run the same command again to resume.")
             return False
 

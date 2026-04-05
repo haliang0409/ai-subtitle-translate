@@ -569,6 +569,16 @@ class SubtitleTranslatorApp(QMainWindow):
         layout.addWidget(self._batch_spin, row, 1)
         row += 1
 
+        # 并发线程数
+        layout.addWidget(QLabel("并发线程数"), row, 0)
+        self._threads_spin = QSpinBox()
+        self._threads_spin.setMinimum(1)
+        self._threads_spin.setMaximum(32)
+        self._threads_spin.setValue(self._cfg.get("num_threads", 1))
+        self._threads_spin.setToolTip("多线程并发翻译，可大幅加快速度")
+        layout.addWidget(self._threads_spin, row, 1)
+        row += 1
+
         # 请求间隔
         layout.addWidget(QLabel("请求间隔 (秒)"), row, 0)
         self._interval_spin = QDoubleSpinBox()
@@ -934,18 +944,22 @@ class SubtitleTranslatorApp(QMainWindow):
                         start_index = 0
 
         batch_size = translator.default_batch_size
+        num_threads = self._threads_spin.value()
         self._update_progress(start_index, total)
 
-        try:
-            i = start_index
-            while i < total:
-                if self._stop_event.is_set():
-                    translator._save_progress(output_file, i, subs)
-                    self._log(f"⏸ 已中断，进度保存至 {i}/{total}")
-                    return False
+        remaining = total - start_index
+        num_threads = max(1, min(num_threads, remaining))
+        if num_threads > 1:
+            self._log(f"🚀 使用 {num_threads} 个线程并发翻译")
 
-                batch_end = min(i + batch_size, total)
-                batch_texts = all_originals[i:batch_end]
+        def _gui_translate_chunk(chunk_start, chunk_end):
+            """单个线程翻译一段范围的字幕"""
+            for i in range(chunk_start, chunk_end, batch_size):
+                if self._stop_event.is_set():
+                    return
+
+                batch_end_idx = min(i + batch_size, chunk_end)
+                batch_texts = all_originals[i:batch_end_idx]
 
                 if enhanced_context:
                     ctx_start = max(0, i - translator.context_window)
@@ -954,8 +968,8 @@ class SubtitleTranslatorApp(QMainWindow):
                         for j in range(ctx_start, i)
                         if all_translations[j]
                     ]
-                    ctx_end = min(total, batch_end + translator.context_window)
-                    ctx_after = all_originals[batch_end:ctx_end]
+                    ctx_end = min(total, batch_end_idx + translator.context_window)
+                    ctx_after = all_originals[batch_end_idx:ctx_end]
                     translated = translator.translate_batch_with_context(
                         batch_texts, ctx_before, ctx_after
                     )
@@ -965,31 +979,67 @@ class SubtitleTranslatorApp(QMainWindow):
                 for j, text in enumerate(translated):
                     idx = i + j
                     if idx < total:
-                        final = text.replace(" [BR] ", "\n").replace("[BR]", "\n")
-                        subs[idx].text = final
                         all_translations[idx] = text
 
-                translator._save_progress(output_file, batch_end, subs)
-                self._update_progress(batch_end, total)
-                self._log(f"✓ {batch_end}/{total} 条完成")
+                with progress_lock:
+                    nonlocal completed_count
+                    completed_count += len(batch_texts)
+                    self._update_progress(start_index + completed_count, total)
+                    self._log(f"✓ {start_index + completed_count}/{total} 条完成")
 
                 # 可中断的等待
-                if batch_end < total and translator.request_interval > 0:
+                if batch_end_idx < chunk_end and translator.request_interval > 0:
                     elapsed = 0.0
                     while elapsed < translator.request_interval:
                         if self._stop_event.is_set():
-                            break
+                            return
                         time.sleep(0.1)
                         elapsed += 0.1
 
-                i = batch_end
+        try:
+            progress_lock = threading.Lock()
+            completed_count = 0
+
+            if num_threads <= 1:
+                _gui_translate_chunk(start_index, total)
+            else:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                chunk_size = remaining // num_threads
+                chunks = []
+                for t in range(num_threads):
+                    c_start = start_index + t * chunk_size
+                    c_end = start_index + (t + 1) * chunk_size if t < num_threads - 1 else total
+                    if c_start < c_end:
+                        chunks.append((c_start, c_end))
+
+                with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    futures = {
+                        executor.submit(_gui_translate_chunk, c_start, c_end): (c_start, c_end)
+                        for c_start, c_end in chunks
+                    }
+                    for future in as_completed(futures):
+                        exc = future.exception()
+                        if exc:
+                            raise TranslationError(f"线程翻译失败：{exc}")
 
         except TranslationError as e:
             self._log(f"❌ 翻译中止：{e}")
             return False
 
         if self._stop_event.is_set():
+            # Save partial progress
+            for idx in range(total):
+                if all_translations[idx] is not None:
+                    subs[idx].text = all_translations[idx].replace(" [BR] ", "\n").replace("[BR]", "\n")
+            translated_count = sum(1 for t in all_translations if t is not None)
+            translator._save_progress(output_file, translated_count, subs)
+            self._log(f"⏸ 已中断，进度保存至 {translated_count}/{total}")
             return False
+
+        # Apply translations to subs
+        for idx in range(start_index, total):
+            if all_translations[idx] is not None:
+                subs[idx].text = all_translations[idx].replace(" [BR] ", "\n").replace("[BR]", "\n")
 
         # 格式转换（如有）
         out_fmt = self._format_combo.currentText()
@@ -1057,6 +1107,7 @@ class SubtitleTranslatorApp(QMainWindow):
             "target_language": self._lang_field.text().strip() or "Chinese",
             "model_name": self._model_field.text().strip(),
             "batch_size": self._batch_spin.value(),
+            "num_threads": self._threads_spin.value(),
             "request_interval": round(self._interval_spin.value(), 2),
             "context_window": self._context_spin.value(),
             "max_retries": self._retries_spin.value(),

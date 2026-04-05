@@ -10,6 +10,7 @@
   "target_language": "Chinese",
   "model_name": "gpt-4o-mini",
   "batch_size": 30,
+  "num_threads": 1,
   "request_interval": 1.0,
   "context_window": 5,
   "max_retries": 3,

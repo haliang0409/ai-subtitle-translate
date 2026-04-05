@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--test", action="store_true", help="Test API connection and exit")
     parser.add_argument("--no-resume", action="store_true", help="Start fresh, ignore previous progress")
     parser.add_argument("--context", action="store_true", help="Enable enhanced context mode for better coherence")
+    parser.add_argument("-t", "--threads", type=int, default=1, help="Number of concurrent translation threads (default: 1)")
     parser.add_argument("--gui", action="store_true", help="Launch GUI mode (PyQt6)")
 
     args = parser.parse_args()
@@ -58,11 +59,12 @@ def main():
     
     print(f"Starting translation of '{args.input}' to {translator.target_lang}...")
     translator.translate(
-        args.input, 
-        args.output, 
-        batch_size=args.batch, 
+        args.input,
+        args.output,
+        batch_size=args.batch,
         resume=not args.no_resume,
-        enhanced_context=args.context
+        enhanced_context=args.context,
+        num_threads=args.threads
     )
 
 
